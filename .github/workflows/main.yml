@@ -1,0 +1,31 @@
+# .github/workflows/monitor.yml
+name: Monitor Java Obfuscators
+
+on:
+  schedule:
+    - cron: '0 9 * * *'  # Daily at 9am UTC
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Search GitHub
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh search repos "java obfuscation" --language java \
+            --created ">=2025-01-01" --sort updated --limit 50 \
+            --json name,url,updatedAt \
+            | jq '.[] | "\(.updatedAt) \(.name) \(.url)"' -r \
+            >> results.txt
+          cat results.txt
+      - name: Create Issue if results found
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --title "Java Obfuscator Update $(date +%Y-%m-%d)" \
+            --body "$(cat results.txt)" \
+            --repo ${{ github.repository }}
