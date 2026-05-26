@@ -1,40 +1,108 @@
+# .github/workflows/monitor.yml
 name: Monitor Java Obfuscators
 
 on:
   schedule:
-    - cron: '0 9 * * *'
-  workflow_dispatch:
+    - cron: '0 9 * * *'  # Daily at 9am UTC
+  workflow_dispatch:       # Allow manual trigger
 
 permissions:
-  issues: write      # ← This is the fix
-  contents: read
+  contents: write          # Needed to commit files
 
 jobs:
-  check:
+  monitor:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repo
+        uses: actions/checkout@v3
 
-      - name: Search GitHub
+      - name: Search GitHub for Java Obfuscator repos
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          mkdir -p reports
+
+          # Run all 3 searches and merge + deduplicate
           {
-            gh search repos "java obfuscator" --language java --created ">=2025-01-01" --sort updated --limit 100 --json name,url,updatedAt
-            gh search repos "java obfuscation" --language java --created ">=2025-01-01" --sort updated --limit 100 --json name,url,updatedAt
-            gh search repos --topic obfuscation --language java --created ">=2025-01-01" --sort updated --limit 100 --json name,url,updatedAt
-          } | jq -s '[.[][]] | unique_by(.url) | .[] | "\(.updatedAt) | \(.name) | \(.url)"' -r > results.txt
-          cat results.txt
+            gh search repos "java obfuscator" \
+              --language java \
+              --created ">=2025-01-01" \
+              --sort updated \
+              --limit 100 \
+              --json name,url,updatedAt
 
-      - name: Create Issue if results found
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            gh search repos "java obfuscation" \
+              --language java \
+              --created ">=2025-01-01" \
+              --sort updated \
+              --limit 100 \
+              --json name,url,updatedAt
+
+            gh search repos --topic obfuscation \
+              --language java \
+              --created ">=2025-01-01" \
+              --sort updated \
+              --limit 100 \
+              --json name,url,updatedAt
+
+          } | jq -s '
+            [.[][]]
+            | unique_by(.url)
+            | sort_by(.updatedAt)
+            | reverse
+            | .[]
+            | "- Updated: \(.updatedAt[:10]) | \(.name) | \(.url)"
+          ' -r > reports/$(date +%Y-%m-%d).txt
+
+          echo "Results saved:"
+          cat reports/$(date +%Y-%m-%d).txt
+
+      - name: Check if anything new compared to yesterday
+        id: diff_check
         run: |
-          if [ -s results.txt ]; then
-            gh issue create \
-              --title "Java Obfuscator Update $(date +%Y-%m-%d)" \
-              --body "$(cat results.txt)" \
-              --repo JoyelTheDev/test
+          TODAY=reports/$(date +%Y-%m-%d).txt
+          YESTERDAY=reports/$(date -d "yesterday" +%Y-%m-%d).txt
+
+          if [ -f "$YESTERDAY" ]; then
+            NEW=$(comm -13 <(sort "$YESTERDAY") <(sort "$TODAY"))
+            if [ -n "$NEW" ]; then
+              echo "new_found=true" >> $GITHUB_OUTPUT
+              echo "New repos found:"
+              echo "$NEW"
+            else
+              echo "new_found=false" >> $GITHUB_OUTPUT
+              echo "No new repos since yesterday."
+            fi
           else
-            echo "No results found, skipping issue creation."
+            echo "new_found=true" >> $GITHUB_OUTPUT
+            echo "First run — baseline created."
+          fi
+
+      - name: Update latest.md summary file
+        run: |
+          echo "# Java Obfuscator Monitor" > reports/latest.md
+          echo "" >> reports/latest.md
+          echo "**Last updated:** $(date +%Y-%m-%d)" >> reports/latest.md
+          echo "" >> reports/latest.md
+          echo "## Latest Results" >> reports/latest.md
+          echo "" >> reports/latest.md
+          cat reports/$(date +%Y-%m-%d).txt >> reports/latest.md
+
+      - name: Commit and push results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add reports/
+
+          # Only commit if there are actual changes
+          if git diff --staged --quiet; then
+            echo "Nothing changed, skipping commit."
+          else
+            if [ "${{ steps.diff_check.outputs.new_found }}" == "true" ]; then
+              git commit -m "🆕 New Java obfuscator repos found - $(date +%Y-%m-%d)"
+            else
+              git commit -m "📋 Daily scan - $(date +%Y-%m-%d) (no new repos)"
+            fi
+            git push
           fi
