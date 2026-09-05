@@ -1,9 +1,3 @@
-# Java Obfuscator Monitor
-
-**Last updated:** 2026-09-05
-
-## Latest Results
-
 - Updated: 2026-09-05 | glsl_obfuscator | https://github.com/Niwer1525/glsl_obfuscator
 - Updated: 2026-09-04 | XopProtector | https://github.com/xopJack/XopProtector
 - Updated: 2026-09-03 | aidsfuscator | https://github.com/LvStrnggg/aidsfuscator
